@@ -1,0 +1,19 @@
+echo -e "
+
+	/**
+	 * Get the ${normal_mem}.
+	 *
+	 * @return the ${normal_mem}.
+	 */
+	public ${mem_type} get${camel_mem}() {
+		return(this.${normal_mem});
+	}
+	
+	/**
+	 * Set the value of ${normal_mem}.
+	 *
+	 * @param ${normal_mem} the ${normal_mem} to set.
+	 */
+	public void set${camel_mem}(${mem_type} ${normal_mem}) {
+		this.${normal_mem} = ${normal_mem};
+	}"

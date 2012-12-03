@@ -1,0 +1,385 @@
+#!/usr/bin/python
+
+# Copyright (C) 2011 Leandro Lisboa Penz
+# Leandro Lisboa Penz <lpenz@lpenz.org>
+# http://github.com/lpenz/google-spreadsheet-csv
+#
+# BSD license:
+#
+#  All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+#      * Redistributions of source code must retain the above copyright
+#        notice, this list of conditions and the following disclaimer.
+#      * Redistributions in binary form must reproduce the above copyright
+#        notice, this list of conditions and the following disclaimer in the
+#        documentation and/or other materials provided with the distribution.
+#      * Neither the name of the <organization> nor the
+#        names of its contributors may be used to endorse or promote products
+#        derived from this software without specific prior written permission.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+#  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+#  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+#  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+#  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+#  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+#  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+#  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+try: 
+  from xml.etree import ElementTree
+except ImportError:
+  from elementtree import ElementTree
+import gdata.spreadsheet.service
+import gdata.service
+import atom.service
+import gdata.spreadsheet
+import atom
+import os
+from optparse import OptionParser
+import csv
+import sys
+import codecs
+import locale
+import cStringIO
+import re
+import getpass
+
+PROGRAM_NAME = "google-spreadsheet-csv"
+PROGRAM_VERSION = "1.1"
+
+__version__ = PROGRAM_VERSION
+
+# Useful functions: ##########################################################
+
+class Dprint(object):
+    def __init__(self, config):
+        self.enable = config.verbose
+    def __call__(self, s):
+        if not self.enable:
+            return
+        sys.stdout.write(s)
+
+def eprint(s):
+    sys.stderr.write(s)
+
+# CSV missing stuff: #########################################################
+
+class UTF8Recoder:
+    """
+    Iterator that reads an encoded stream and reencodes the input to UTF-8
+    """
+    def __init__(self, f, encoding):
+        self.reader = codecs.getreader(encoding)(f)
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.reader.next().encode("utf-8")
+
+
+class CSVUnicodeReader:
+    """
+    A CSV reader which will iterate over lines in the CSV file "f",
+    which is encoded in the given encoding.
+    """
+
+    def __init__(self, f, dialect=csv.excel, encoding=None, **kwds):
+        if not encoding:
+            _, encoding = locale.getdefaultlocale()
+        self.encoder = codecs.getincrementalencoder(encoding)()
+        f = UTF8Recoder(f, encoding)
+        self.reader = csv.reader(f, dialect=dialect, **kwds)
+
+    def next(self):
+        row = self.reader.next()
+        return [unicode(s, "utf-8") for s in row]
+
+    def __iter__(self):
+        return self
+
+
+class CSVUnicodeWriter:
+    """
+    A CSV writer which will write rows to CSV file "f",
+    which is encoded in the given encoding.
+    """
+
+    def __init__(self, f, dialect=csv.excel, encoding=None, **kwds):
+        # Redirect output to a queue
+        self.queue = cStringIO.StringIO()
+        self.writer = csv.writer(self.queue, dialect=dialect, **kwds)
+        self.stream = f
+        if not encoding:
+            _, encoding = locale.getdefaultlocale()
+        self.encoder = codecs.getincrementalencoder(encoding)()
+
+    def writerow(self, row):
+        self.writer.writerow([s.encode("utf-8") for s in row])
+        # Fetch UTF-8 output from the queue ...
+        data = self.queue.getvalue()
+        data = data.decode("utf-8")
+        # ... and reencode it into the target encoding
+        data = self.encoder.encode(data)
+        # write to the target stream
+        self.stream.write(data)
+        # empty queue
+        self.queue.truncate(0)
+
+    def writerows(self, rows):
+        for row in rows:
+            self.writerow(row)
+
+def logDebug(msg):
+    print '%s' % msg
+
+def logError(msg):
+    print '\033[1;31m%s\033[0m' % msg
+    print '\033[1;31m---------------------------------------------------------------------------\033[0m'
+    raise IOError
+
+# Google connection: #########################################################
+
+def connect(config):
+    logDebug('Connecting using %s' % str(config.user))
+    client = gdata.spreadsheet.service.SpreadsheetsService()
+    client.ClientLogin(str(config.user), str(config.password))
+    return client
+
+
+def connectAndGetSheetList(config, docKeyOrName):
+    client = connect(config)
+
+    logDebug('Getting worksheets of %s (assuming it is doc-name)' % docKeyOrName)
+    docKey = None
+    for aDoc in client.GetSpreadsheetsFeed().entry:
+        if aDoc.title.text == docKeyOrName:
+           docKey = aDoc.id.text.rsplit('/',1)[1]
+           break
+
+    if docKey == None:
+        docKey = docKeyOrName
+
+    logDebug('Getting worksheets of %s (assuming it is doc-key)' % docKey)
+    sheetList = client.GetWorksheetsFeed(docKey).entry
+    if len(sheetList) <= 0:
+        logError('No worksheet found within the document %s' % docKey)
+
+    return client, docKey, sheetList
+
+def connectAndGetSheetKey(config, docKeyOrName, worksheetName):
+    client, docKey, sheetList = connectAndGetSheetList(config, docKeyOrName)
+    
+    worksheetKey = None
+    for w in sheetList:
+        if w.title.text == worksheetName:
+            worksheetKey = w.id.text.rsplit('/', 1)[1]
+            break
+
+    if worksheetKey == None:
+        logError('Worksheet %s not found' % worksheetName)
+    
+    return client, docKey, worksheetKey
+
+
+def connectAndGetSheetKeys(config, docKeyOrName):
+    client, docKey, sheetList = connectAndGetSheetList(config, docKeyOrName)
+    
+    worksheetKeys = {}
+    for w in sheetList:
+       worksheetKeys[w.id.text.rsplit('/', 1)[1]] = w.title.text
+    
+    return client, docKey, worksheetKeys
+
+
+def google_get_header(config, client, docKey, worksheetKey):
+    dprint = Dprint(config)
+    dprint('Getting header\n')
+    cellfeed = client.GetCellsFeed(docKey, worksheetKey)
+    fields = []
+    for c in cellfeed.entry:
+        if c.title.text[1:] != '1':
+            continue
+        fields.append(c.content.text.lower())
+    return fields
+
+# Get: #######################################################################
+
+def gss_get_write_csv(config, client, docKey, worksheetKey, worksheetName):
+    logDebug('\n=== Processing "%s"' % worksheetName)
+    
+    dprint = Dprint(config)
+    filePath = '%s/%s.csv' % (config.output, worksheetName)
+    fdout = open(filePath, 'w')
+    csvout = CSVUnicodeWriter(fdout)
+    
+    fields = google_get_header(config, client, docKey, worksheetKey)
+    csvout.writerow(fields)
+    listfeed = client.GetListFeed(docKey, worksheetKey)
+    t = len(listfeed.entry)
+    i = 1
+    for lf in listfeed.entry:
+        dprint('%03d/%03d: getting row\n' % (i, t))
+        i = i + 1
+        lu = [ lf.custom[re.sub('[^a-zA-Z0-9-]', '', f)].text for f in fields ]
+        lt = []
+        for c in lu:
+            ct = c
+            if isinstance(c, type(None)):
+                ct = u''
+            lt.append(ct)
+        csvout.writerow(lt)
+    logDebug('%s is saved. %d lines found. Please note that exporting stopped at 1st blank row.' % (filePath, t))
+
+def gss_get(config, docKeyOrName, worksheetName):
+    if str(worksheetName) == '':
+        client, docKey, worksheetKeys = connectAndGetSheetKeys(config, docKeyOrName)
+    else:
+        worksheetKeys = {}
+        client, docKey, worksheetKey = connectAndGetSheetKey(config, docKeyOrName, worksheetName)
+        worksheetKeys[worksheetKey] = worksheetName
+
+    for worksheetKey in worksheetKeys:
+        gss_get_write_csv(config, client, docKey, worksheetKey, worksheetKeys[worksheetKey])
+
+# Send: ######################################################################
+
+def gss_send(config, docKeyOrName, worksheetName):
+    dprint = Dprint(config)
+    if config.output:
+        parser.error('invalid input argument')
+    if not config.input:
+        fdin = sys.input
+    else:
+        fdin = open(config.input, 'r')
+    csvin = CSVUnicodeReader(fdin)
+    client, docKey, worksheetKey = connectAndGetSheetKey(config, docKeyOrName, worksheetName)
+    fields = google_get_header(config, client, docKey, worksheetKey)
+    found = set()
+    for l in csvin:
+        for c in l:
+            if not c in fields:
+                raise NameError, 'CSV field %s not found in spreadsheet; found fields: %s' % (c, ', '.join(fields))
+            found.add(c)
+        break
+    blankrow = {}
+    for f in fields:
+        blankrow[f] = ''
+        if f in found:
+            continue
+        raise NameError, 'spreadsheet field %s not found in CSV' % f
+    csvlines = []
+    for l in csvin:
+        newrow = {}
+        i = 0
+        for f in fields:
+            if i > len(l):
+                raise NameError, 'row has less columns than header (%d < %d):\n%s' % (i, len(fields), l)
+            newrow[f] = l[i]
+            i = i + 1
+        csvlines.append(newrow)
+    listfeed = client.GetListFeed(docKey, worksheetKey)
+    i = 0
+    tgss = len(listfeed.entry)
+    tcsv = len(csvlines)
+    t = max(tgss, tcsv)
+    while i < tgss and i < tcsv:
+        skip = True
+        diff = None
+        for f in fields:
+            f1 = csvlines[i][f]
+            f2 = unicode(listfeed.entry[i].custom[f].text)
+            if f2 == u'None':
+                f2 = u''
+            if f1 != f2:
+                skip = False
+                diff = f
+                break
+        if not skip:
+            dprint('%03d/%03d: update, field %s differs; %s != %s\n' % (i+1, t, diff, f1, f2))
+            client.UpdateRow(listfeed.entry[i], csvlines[i])
+        else:
+            dprint('%03d/%03d: contents are the same, skip\n' % (i+1, t))
+        i = i + 1
+    ig0 = i
+    while i < tcsv:
+        dprint('%03d/%03d: insert\n' % (i+1, t))
+        client.InsertRow(csvlines[i], docKey, worksheetKey)
+        i = i + 1
+    ig0 = i
+    while i < tgss:
+        if config.blank:
+            dprint('%03d/%03d: blank\n' % (i+1, t))
+            try:
+                client.UpdateRow(listfeed.entry[len(listfeed.entry) - (i - ig0) - 1], blankrow)
+            except gdata.service.RequestError:
+                pass
+        else:
+            dprint('%03d/%03d: delete\n' % (i+1, t))
+            client.DeleteRow(listfeed.entry[len(listfeed.entry) - (i - ig0) - 1])
+        i = i + 1
+
+# Main: ######################################################################
+
+def main():
+    parser = OptionParser(usage='''\
+Usage: %prog [-h]
+       %prog [-v] [-i <input-file>] [ -u <user@gmail.com> ] [ -p <password> ] send <docKeyOrName> <worksheetName>
+       %prog [-v] [-o <output-dir>] [ -u <user@gmail.com> ] [ -p <password> ] get  <docKeyOrName> <worksheet1Name> <worksheet2Name> ... \
+''',
+    version="%prog "+__version__,
+    description='''\
+google-spreadsheet-csv is a program used to sync or get data from a google
+spreadsheet. It interfaces locally with CSV files.
+'''
+    )
+    parser.add_option("-v", "--verbose", dest="verbose", action="store_true", default=False, help="Be verbose.")
+    parser.add_option("-i", "--input", dest="input", default='', help="Input file.")
+    parser.add_option("-o", "--output", dest="output", default='', help="Output directory.")
+    parser.add_option("-b", "--blank-rows", dest="blank", action="store_true", default=False, help="Blank surplus rows in spreadsheet instead of deleting them.")
+    parser.add_option("-u", "--user", dest="user", default='', help="Username to login in google server.")
+    parser.add_option("-p", "--password", dest="password", default='', help="Password for the username.")
+
+    (config, args) = parser.parse_args()
+
+    if str(config.user) == '':
+        parser.error('User not found')
+    
+    if len(args) <= 0 or ( args[0] != 'get' and args[0] != 'send' ):
+        parser.error('expected arguments (get or send, docKeyOrName, sheetName) not found')
+
+    if args[0] == 'get':
+        if len(args) < 2:
+            parser.error('expected arguments (get, docKeyOrName) not found')
+        if str(config.output) == '':
+            parser.error('Output directory not found')
+
+    if args[0] == 'send':
+        if len(args) < 3:
+            parser.error('expected arguments (get, docKeyOrName, sheetName) not found')
+        if str(config.input) == '':
+            parser.error('Input CSV not found')
+
+    if str(config.password) == '':
+        config.password = getpass.getpass('Password (' + str(config.user) + '): ')
+        if config.password == '':
+            parser.error('Password is empty.')
+   
+    if args[0] == 'get':
+       if len(args) == 2:
+         gss_get(config, args[1], '')
+       else:
+         for i in range(2, len(args)):
+            gss_get(config, args[1], args[i])
+    elif args[0] == 'send':
+       gss_send(config, args[1], args[2])
+
+
+if __name__ == '__main__':
+    main()
+

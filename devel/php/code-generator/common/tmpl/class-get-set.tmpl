@@ -1,0 +1,9 @@
+echo -e "
+
+	public function get${camel_mem}() {
+		return \$this->${normal_mem};
+	}
+	
+	public function set${camel_mem}(\$${normal_mem}) {
+		\$this->${normal_mem} = \$${normal_mem};
+	}"

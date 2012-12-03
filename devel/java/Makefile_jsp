@@ -1,0 +1,15 @@
+include Makefile
+
+tomcat_home=/opt/apache-tomcat-5.5.25
+out_war=
+
+######################################################################################
+# jar:
+#    Create a JAR file from the generated class files.
+#    This time no manifest file will be supplied.
+war: compile
+	@echo -n "   Creating $(out_war): "
+	${java_bin}/jar cf $(out_war) -C $(cp_out)/ .
+
+install: compile war
+	mv -f $(out_war) ${tomcat_home}/webapps/

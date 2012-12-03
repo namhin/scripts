@@ -1,0 +1,21 @@
+foo:
+	@echo "Usage:"
+	@echo "   make compile file=filename.c"
+	@echo "   make run     file=filename.c"
+
+compile:
+ifneq "${file}" ""
+	gcc -Wall -lm -lcrypt -O2 -pipe -ansi -DONLINE_JUDGE -o ${file}.out ${file}
+else
+	@echo "Usage:  make compile file=filename.c"
+endif
+
+run: compile
+ifneq "${file}" ""
+	./${file}.out
+else
+	@echo "Usage:  make run file=filename.c"
+endif
+
+clean:
+	rm -rf *.out

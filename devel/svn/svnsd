@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# Copy this file into /etc/init.d/ and then run `chkconfig --add svnsd`
+#
+# chkconfig: 345 99 01
+# description: Runs the svn daemon for supporting the protocol "svn://".
+# pidfile: /var/run/svnsd.pid
+
+prog=svnsd
+
+start() {
+	echo -n $"Starting $prog: "
+	# -d : Run as daemon.
+	# -r : All repositories resides in here.
+	svnserve -d -r /partitions/versioned-projects/svnroot
+	return 0
+}
+
+stop() {
+	echo -n $"Stoping $prog: "
+	pkill svnserve
+	return 0
+}
+
+restart() {
+	stop
+	sleep 2
+	start
+	return 0
+}
+
+case $1 in
+	start)
+		start
+		;;
+
+	stop)
+		stop
+		;;
+
+	restart)
+		restart
+		;;
+
+	*)
+		echo $"Usage: $prog {start|stop|restart}"
+		exit 3
+esac
+
