@@ -80,7 +80,7 @@ if [ "${DUMP_TYPE}" = "hard" ]; then
 	if [ $? -ne 0 ]; then exit 4; fi
 
 	echo "Granting privileges ..."
-	mysql -u root -p${ROOT_PASS} -e "GRANT all privileges on ${DB_NAME}.* to '${DB_USER}'@'localhost' identified by '${DB_PASS}' with grant option;"
+	mysql -u root -p${ROOT_PASS} -e "GRANT all privileges on ${DB_NAME}.* to '${DB_USER}'@'${DB_HOST}' identified by '${DB_PASS}' with grant option;"
 	if [ $? -ne 0 ]; then exit 4; fi
 fi
 

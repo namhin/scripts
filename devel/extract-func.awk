@@ -5,7 +5,7 @@ BEGIN {
 	bracket = 0
 }
 
-/function[[:space:]]+[[:alpha:]]/ {
+/function +[a-zA-Z0-9]/ {
 	if (length(func_name) <= 0) {
 		func_start = 1
 	}
