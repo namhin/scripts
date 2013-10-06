@@ -17,65 +17,65 @@ fi
 BASE_DIR="`readlink -f "$0" | xargs dirname`"
 . "${BASE_DIR}/../generic.inc.sh"
 
-COMMIT_NO="$1"
-SRC_PATH="$2"
-DST_PATH="$3"
-FTP_HOST="$4"
-FTP_USER="$5"
-if [ $# -gt 5 ]; then IGNORE_PAT="$6" ; else IGNORE_PAT= ; fi
+commit_no="$1"
+src_path="$2"
+dst_path="$3"
+ftp_host="$4"
+ftp_user="$5"
+if [ $# -gt 5 ]; then ignore_pat="$6" ; else ignore_pat= ; fi
 
-FTP_CMD_FILE="ftp-cmd.txt"
-CHANGED_FILES="changed-files.txt"
-CHANGED_DIRS="changed-dirs.txt"
-SLASH="\\"
+ftp_cmd_file="ftp-cmd.txt"
+changed_files="changed-files.txt"
+changed_dirs="changed-dirs.txt"
+slash="\\"
 
-SRC_PATH_ESC="`escape_regex_chars "${SRC_PATH}" | sed "s/\//${SLASH}${SLASH}\//g"`"
-DST_PATH_ESC="`escape_regex_chars "${DST_PATH}" | sed "s/\//${SLASH}${SLASH}\//g"`"
+src_path_escaped="`escape_regex_chars "${src_path}" | sed "s/\//${slash}${slash}\//g"`"
+dst_path_escaped="`escape_regex_chars "${dst_path}" | sed "s/\//${slash}${slash}\//g"`"
 
-git log --format=format:"" --name-only "${COMMIT_NO}...HEAD" "${SRC_PATH}" | grep -v "^[[:space:]]*$" | sort | uniq > "${CHANGED_FILES}"
+git log --format=format:"" --name-only "${commit_no}...HEAD" "${src_path}" | grep -v "^[[:space:]]*$" | sort | uniq > "${changed_files}"
 
 # Remove uncommitting files.
-if [ ! -z "${IGNORE_PAT}" ]; then
-	IGNORE_PAT="`echo "${IGNORE_PAT}" | sed "s/\//${SLASH}${SLASH}\//g"`"
-	echo "Ignoring files having pattern: ${IGNORE_PAT}"
-	sed -i".bak" "/${IGNORE_PAT}/d" "${CHANGED_FILES}"
+if [ ! -z "${ignore_pat}" ]; then
+	ignore_pat="`echo "${ignore_pat}" | sed "s/\//${slash}${slash}\//g"`"
+	echo "Ignoring files having pattern: ${ignore_pat}"
+	sed -i".bak" "/${ignore_pat}/d" "${changed_files}"
 fi
 
-CHANGED_FILES_NUM=`cat "${CHANGED_FILES}" | wc -l`
+changed_files_num=`cat "${changed_files}" | wc -l`
 
-cat "${CHANGED_FILES}" | sed "s/\(.*\)\/.*/\1/g" | sort | uniq > "${CHANGED_DIRS}"
-CHANGED_DIRS_NUM=`cat "${CHANGED_DIRS}" | wc -l`
+cat "${changed_files}" | sed "s/\(.*\)\/.*/\1/g" | sort | uniq > "${changed_dirs}"
+changed_dirs_num=`cat "${changed_dirs}" | wc -l`
 
 # Write down all the FTP commands.
-echo -n "" > "${FTP_CMD_FILE}"
-echo "lcd `pwd`" >> "${FTP_CMD_FILE}"
+echo -n "" > "${ftp_cmd_file}"
+echo "lcd `pwd`" >> "${ftp_cmd_file}"
 
 ###############################################################################
 # Directory ensurance.
-for i in `seq 1 ${CHANGED_DIRS_NUM}`
+for i in `seq 1 ${changed_dirs_num}`
 do
-	dir_to_ensure="`sed -n "${i}p" "${CHANGED_DIRS}" | sed "s/^${SRC_PATH_ESC}\//${DST_PATH_ESC}\//g"`"
+	dir_to_ensure="`sed -n "${i}p" "${changed_dirs}" | sed "s/^${src_path_escaped}\//${dst_path_escaped}\//g"`"
 		echo "
 echo \"Ensuring ${dir_to_ensure}\"...
 mkdir -p \"${dir_to_ensure}\"
-" >> "${FTP_CMD_FILE}"
+" >> "${ftp_cmd_file}"
 done
 
 
 ###############################################################################
-for i in `seq 1 ${CHANGED_FILES_NUM}`
+for i in `seq 1 ${changed_files_num}`
 do
-	file_to_copy="`sed -n "${i}p" "${CHANGED_FILES}"`"
+	file_to_copy="`sed -n "${i}p" "${changed_files}"`"
 	if [ -z "${file_to_copy}" ]; then continue; fi
 	
-	dst_file="`echo "${file_to_copy}" | sed "s/^${SRC_PATH_ESC}\//${DST_PATH_ESC}\//g"`"
+	dst_file="`echo "${file_to_copy}" | sed "s/^${src_path_escaped}\//${dst_path_escaped}\//g"`"
 
 	# Removal.
 	if [ ! -e "${file_to_copy}" ]; then
 		echo "
 echo \"Removing ${dst_file}\"...
 rm -rf \"${dst_file}\"
-" >> "${FTP_CMD_FILE}"
+" >> "${ftp_cmd_file}"
 		continue
 	fi
 
@@ -83,13 +83,13 @@ rm -rf \"${dst_file}\"
 	echo "
 echo \"Copying ${file_to_copy}\"...
 put \"${file_to_copy}\" -o \"${dst_file}\"
-" >> "${FTP_CMD_FILE}"
+" >> "${ftp_cmd_file}"
 
 done
 
 
 # Execute all the written FTP commands.
-read -p "FTP commands gathered in ${FTP_CMD_FILE}. Execute (${SRC_PATH} --> ${DST_PATH})? (y/n) " CHOICE
+read -p "FTP commands gathered in ${ftp_cmd_file}. Execute (${src_path} --> ${dst_path})? (y/n) " CHOICE
 if [ "${CHOICE}" = "y" ]; then
 	read -s -p "FTP Pass? " FTP_PASS
 	if [ -z "${FTP_PASS}" ]; then
@@ -98,14 +98,14 @@ if [ "${CHOICE}" = "y" ]; then
 	fi
 	echo ""
 
-	lftp -u "${FTP_USER}","${FTP_PASS}" "${FTP_HOST}" < "${FTP_CMD_FILE}"
+	lftp -u "${ftp_user}","${FTP_PASS}" "${ftp_host}" < "${ftp_cmd_file}"
 fi
 
 read -p "DONE. Remove temporary files? (y/n) " CHOICE
 if [ "${CHOICE}" = "y" ]; then
-	rm -rf "${CHANGED_FILES}"
-	rm -rf "${CHANGED_FILES}.bak"
-	rm -rf "${CHANGED_DIRS}"
-	rm -rf "${FTP_CMD_FILE}"
+	rm -rf "${changed_files}"
+	rm -rf "${changed_files}.bak"
+	rm -rf "${changed_dirs}"
+	rm -rf "${ftp_cmd_file}"
 fi
 
