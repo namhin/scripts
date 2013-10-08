@@ -58,14 +58,14 @@ get_dst_path() {
 get_changed_dirs() {
 	cat "${changed_dirs}" | while read changed_dir
 	do
-		echo -n -e "\n\t\"`get_dst_path "${changed_dir}"`\""
+		echo -n -e " \"`get_dst_path "${changed_dir}"`\""
 	done
 }
 
 cmd_to_ensure_dirs() {
 	dirs_to_ensure="`get_changed_dirs`"
 	if [ ! -z "${dirs_to_ensure}" ]; then
-		echo -e "ssh ${scp_user}@${scp_host} 'mkdir -p ${dirs_to_ensure}\n'" >> "${scp_cmd_file}"
+		echo -e "ssh ${scp_user}@${scp_host} 'mkdir -p ${dirs_to_ensure}'" >> "${scp_cmd_file}"
 	fi
 }
 
@@ -73,7 +73,7 @@ get_removed_files() {
 	cat "${changed_files}" | while read changed_file
 	do
 		if [ ! -z "${changed_file}" -a ! -e "${changed_file}" ]; then
-			echo -n -e "\n\t\"`get_dst_path "${changed_file}"`\""
+			echo -n -e " \"`get_dst_path "${changed_file}"`\""
 		fi
 	done
 }
@@ -81,7 +81,7 @@ get_removed_files() {
 cmd_to_remove_files() {
 	files_to_remove="`get_removed_files`"
 	if [ ! -z "${files_to_remove}" ]; then
-		echo -e "ssh ${scp_user}@${scp_host} 'rm -rf ${files_to_remove}\n'" >> "${scp_cmd_file}"
+		echo -e "ssh ${scp_user}@${scp_host} 'rm -rf ${files_to_remove}'" >> "${scp_cmd_file}"
 	fi
 }
 
