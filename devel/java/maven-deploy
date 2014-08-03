@@ -1,1 +1,1 @@
-mvn -Dmaven.test.skip=true clean package deploy
+mvn -Dmaven.test.skip=true clean package deploy "$@"

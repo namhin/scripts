@@ -1,0 +1,14 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]; then
+	echo "Usage:  $0  [ 1 to copy dependency too. 0 to copy only class files. ]"
+	exit 1
+fi
+
+/bin/cp -vr target/classes/* src/main/webapp/WEB-INF/classes/
+
+if [ $1 -eq 1 ]; then
+	rm -rf src/main/webapp/WEB-INF/lib/*
+	mvn dependency:copy-dependencies -DoutputDirectory=src/main/webapp/WEB-INF/lib;
+fi
+
