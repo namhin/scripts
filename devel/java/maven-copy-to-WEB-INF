@@ -6,7 +6,7 @@ if [ $# -lt 1 ]; then
 fi
 
 rm -rf src/main/webapp/WEB-INF/classes/*
-/bin/cp -vr target/classes/* src/main/webapp/WEB-INF/classes/
+/bin/cp -r target/classes/* src/main/webapp/WEB-INF/classes/
 
 if [ $1 -eq 1 ]; then
 	rm -rf src/main/webapp/WEB-INF/lib/*
