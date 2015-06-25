@@ -1,0 +1,8 @@
+if [ $# -lt 1 ]; then
+	echo "Usage:  $0  org.some.package"
+	echo "        $0  org.some.package.ClassTest"
+	echo "        $0  org.some.package.ClassTest#testSomething"
+	exit 1
+fi
+
+mvn -Dtest=$1 -DfailIfNoTests=false test
